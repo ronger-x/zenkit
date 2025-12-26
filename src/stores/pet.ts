@@ -1,12 +1,14 @@
 import { defineStore } from "pinia";
 import { ref, computed, watch } from "vue";
 import { useSpeechSynthesis } from "@vueuse/core";
+import removeMarkdown from "remove-markdown";
 import type {
   PetState,
   PetMood,
   ChatMessage,
   PetConfig,
   AIConfig,
+  TTSConfig,
 } from "@/types";
 
 // 随机对话内容
@@ -23,6 +25,22 @@ const RANDOM_CHATS = [
   "呼噜呼噜~ 🐱",
 ];
 
+/**
+ * 清理 Markdown 格式，用于 TTS 朗读
+ * 使用 remove-markdown 库处理，并对代码块做特殊处理
+ */
+function stripMarkdownForTTS(text: string): string {
+  // 先处理代码块，替换为语音提示
+  const textWithCodeReplaced = text.replace(/```[\s\S]*?```/g, '，代码块省略，');
+  // 使用 remove-markdown 处理其他格式
+  return removeMarkdown(textWithCodeReplaced, {
+    stripListLeaders: true,
+    listUnicodeChar: '',
+    gfm: true,
+    useImgAltText: false,
+  }).trim();
+}
+
 export const usePetStore = defineStore("pet", () => {
   // ========== 状态 ==========
   const state = ref<PetState>("idle");
@@ -35,12 +53,36 @@ export const usePetStore = defineStore("pet", () => {
   const isSpeaking = ref(false); // 正在播放语音
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // 语音合成
+  // TTS 配置
+  const ttsConfig = ref<TTSConfig>({
+    provider: "web-speech",
+    voice: "",
+    rate: 1,
+    pitch: 1,
+  });
+
+  const availableVoices = ref<SpeechSynthesisVoice[]>([]);
+  const updateVoices = () => {
+    availableVoices.value = window.speechSynthesis.getVoices();
+  };
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.onvoiceschanged = updateVoices;
+      updateVoices();
+  }
+  
+  // 使用 computed 来获取当前语音
+  const currentVoice = computed(() => {
+    const voice = availableVoices.value.find(v => v.name === ttsConfig.value.voice);
+    return voice as SpeechSynthesisVoice;
+  });
+
+  // 语音合成 - 确保 pitch 和 rate 有有效的默认值
   const speech = useSpeechSynthesis(speechText, {
     lang: "zh-CN",
-    pitch: 1,
-    rate: 1,
+    pitch: computed(() => ttsConfig.value.pitch || 1),
+    rate: computed(() => ttsConfig.value.rate || 1),
     volume: 1,
+    voice: currentVoice,
   });
 
   // 监听语音状态，语音结束 2 秒后隐藏气泡
@@ -92,6 +134,15 @@ export const usePetStore = defineStore("pet", () => {
     aiConfig.value = { ...aiConfig.value, ...newConfig };
   };
 
+  // 更新气泡文本（用于流式输出）
+  const updateBubble = (text: string) => {
+    if (hideTimer) clearTimeout(hideTimer);
+    showBubble.value = true;
+    currentText.value = text;
+    state.value = "talking";
+    lastInteractionTime.value = Date.now();
+  };
+
   // 显示对话气泡
   const say = (text: string, duration = 5000) => {
     if (hideTimer) clearTimeout(hideTimer);
@@ -100,18 +151,26 @@ export const usePetStore = defineStore("pet", () => {
     lastInteractionTime.value = Date.now();
 
     currentText.value = text;
-    // 添加前导空格以解决首字吞音问题
-    speechText.value = " " + text;
+    // 清理 Markdown 格式后再用于 TTS，添加前导空格以解决首字吞音问题
+    speechText.value = " " + stripMarkdownForTTS(text);
 
     showBubble.value = true;
     state.value = "talking";
 
     // 播放语音
+    console.log("🔊 TTS Check - voiceEnabled:", config.value.voiceEnabled, "text:", text.slice(0, 20));
     if (config.value.voiceEnabled) {
+      console.log("🔊 TTS Starting - speechText:", speechText.value.slice(0, 20), "voice:", ttsConfig.value.voice);
+      // 停止之前的语音
+      if (speech.isPlaying.value) {
+        window.speechSynthesis.cancel();
+      }
+      
       // 确保文本更新后再播放
       setTimeout(() => {
+        console.log("🔊 TTS speak() called");
         speech.speak();
-      }, 50);
+      }, 100);
       // 语音模式下，气泡的隐藏由 watch(speech.isPlaying) 控制
       // 这里不设置 hideTimer，避免语音未播完就隐藏
     } else {
@@ -274,6 +333,63 @@ export const usePetStore = defineStore("pet", () => {
     }
   });
 
+  // ========== 设置同步 ==========
+  const applySettings = (settings: any) => {
+    console.log("📦 Applying settings:", settings);
+    if (settings.petName) config.value.name = settings.petName;
+    if (settings.personality) config.value.personality = settings.personality;
+    if (settings.behavior) {
+        config.value.autoChat = settings.behavior.autoChat;
+        config.value.autoChatInterval = settings.behavior.autoChatInterval;
+    }
+    if (settings.ai) {
+        aiConfig.value = settings.ai;
+    }
+    if (settings.tts) {
+        // 合并 TTS 设置，保留默认的 pitch 和 rate
+        ttsConfig.value = {
+          provider: settings.tts.provider || ttsConfig.value.provider,
+          voice: settings.tts.voice || ttsConfig.value.voice,
+          rate: typeof settings.tts.rate === 'number' ? settings.tts.rate : ttsConfig.value.rate,
+          pitch: typeof settings.tts.pitch === 'number' ? settings.tts.pitch : ttsConfig.value.pitch,
+          enabled: settings.tts.enabled,
+        };
+        config.value.voiceEnabled = settings.tts.enabled === true;
+        console.log("🔊 TTS settings applied - voiceEnabled:", config.value.voiceEnabled, "ttsConfig:", ttsConfig.value);
+    }
+    if (settings.display) {
+        config.value.scale = settings.display.scale;
+        config.value.opacity = settings.display.opacity;
+        config.value.showName = settings.display.showName;
+    }
+  };
+
+  const loadSettings = async () => {
+    if (window.electronAPI?.getSettings) {
+      try {
+        const settings = await window.electronAPI.getSettings();
+        if (settings) {
+          applySettings(settings);
+        }
+      } catch (e) {
+        console.error("Failed to load settings in store:", e);
+      }
+    }
+  };
+
+  if (window.electronAPI?.onSettingsUpdated) {
+    window.electronAPI.onSettingsUpdated((settings) => {
+      applySettings(settings);
+    });
+  }
+
+  loadSettings();
+
+  // 更新 TTS 配置
+  const updateTTSConfig = (newConfig: Partial<TTSConfig>) => {
+    ttsConfig.value = { ...ttsConfig.value, ...newConfig };
+  };
+
   return {
     // 状态
     state,
@@ -283,17 +399,21 @@ export const usePetStore = defineStore("pet", () => {
     chatHistory,
     config,
     aiConfig,
+    ttsConfig,
+    availableVoices,
     isSpeaking,
     // 计算属性
     isInteracting,
     // 方法
     say,
+    updateBubble,
     randomChat,
     interact,
     sleep,
     setState,
     updateConfig,
     updateAIConfig,
+    updateTTSConfig,
     addMessage,
     clearHistory,
     startAutoChat,

@@ -124,11 +124,14 @@ const defaultSettings = {
     apiKey: "",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-3.5-turbo",
+    models: {}, // 保存获取到的模型列表
   },
   tts: {
     enabled: false,
-    provider: "edge-tts",
+    provider: "web-speech",
     voice: "zh-CN-XiaoxiaoNeural",
+    rate: 1,
+    pitch: 1,
   },
   behavior: {
     autoChat: true,
@@ -531,6 +534,14 @@ ipcMain.on("open-external", (_event, url: string) => {
 ipcMain.on("open-logs", () => {
   log("INFO", "Opening logs directory:", logsDir);
   shell.openPath(logsDir);
+});
+
+// 打开开发者工具
+ipcMain.on("open-devtools", () => {
+  log("INFO", "Opening DevTools");
+  if (mainWindow) {
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  }
 });
 
 // ============ 系统监控 ============

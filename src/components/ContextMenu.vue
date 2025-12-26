@@ -72,6 +72,14 @@ const menuItems = [
       emit("close");
     },
   },
+  {
+    icon: "🛠️",
+    label: "开发者工具",
+    action: () => {
+      window.electronAPI?.openDevTools?.();
+      emit("close");
+    },
+  },
 ];
 
 const handleItemClick = (item: (typeof menuItems)[0]) => {

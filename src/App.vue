@@ -74,9 +74,9 @@ const handleContextMenu = (e: MouseEvent) => {
   // 如果正在聊天，不显示右键菜单
   if (showChatInput.value) return;
 
-  // 右键菜单尺寸（估算）
-  const menuWidth = 160;
-  const menuHeight = 200;
+  // 右键菜单尺寸（估算：7个菜单项 * 40px + 分隔线 + padding）
+  const menuWidth = 180;
+  const menuHeight = 320;
 
   // 窗口尺寸
   const windowWidth = window.innerWidth;
@@ -93,7 +93,7 @@ const handleContextMenu = (e: MouseEvent) => {
 
   // 如果底部空间不足，显示在鼠标上方
   if (y + menuHeight > windowHeight) {
-    y = Math.max(0, y - menuHeight);
+    y = Math.max(0, windowHeight - menuHeight);
   }
 
   contextMenuPosition.value = { x, y };

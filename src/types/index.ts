@@ -36,14 +36,16 @@ export interface AIConfig {
   apiKey?: string;
   baseUrl?: string;
   model: string;
+  models?: Record<string, string[]>; // 保存获取到的模型列表
 }
 
 // TTS 配置
 export interface TTSConfig {
-  provider: "edge-tts" | "azure" | "elevenlabs" | "local";
+  provider: "web-speech" | "edge-tts" | "azure" | "elevenlabs" | "local";
   voice: string;
   rate: number;
   pitch: number;
+  enabled?: boolean;
 }
 
 // Electron API 类型（从 preload 暴露）
@@ -62,6 +64,7 @@ export interface ElectronAPI {
   selectFile: (options?: { filters?: any[] }) => Promise<string | null>;
   openExternal: (url: string) => void;
   openLogs: () => void;
+  openDevTools: () => void;
   // 系统监控
   onSystemStats: (callback: (stats: SystemStats) => void) => void;
 }

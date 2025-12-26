@@ -71,6 +71,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.send("open-logs");
   },
 
+  // 打开开发者工具
+  openDevTools: () => {
+    ipcRenderer.send("open-devtools");
+  },
+
   // 监听系统监控
   onSystemStats: (
     callback: (stats: { cpu: number; memory: number }) => void
@@ -95,6 +100,7 @@ export interface ElectronAPI {
   selectFile: (options?: { filters?: any[] }) => Promise<string | null>;
   openExternal: (url: string) => void;
   openLogs: () => void;
+  openDevTools: () => void;
   onSystemStats: (
     callback: (stats: { cpu: number; memory: number }) => void
   ) => void;

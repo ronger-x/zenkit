@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, toRaw, watch } from "vue";
+import { ref, onMounted, computed, toRaw, watch, reactive } from "vue";
 
 const settings = ref({
   petName: "ZenKit",
@@ -11,11 +11,14 @@ const settings = ref({
     apiKey: "",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-3.5-turbo",
+    models: {} as Record<string, string[]>, // 保存获取到的模型列表
   },
   tts: {
     enabled: false,
-    provider: "edge-tts",
-    voice: "zh-CN-XiaoxiaoNeural",
+    provider: "web-speech", // Changed default to web-speech
+    voice: "",
+    rate: 1,
+    pitch: 1,
   },
   behavior: {
     autoChat: true,
@@ -37,6 +40,7 @@ const settings = ref({
 const activeTab = ref("general");
 const saveMessage = ref("");
 const isSaving = ref(false);
+const isFetchingModels = ref(false);
 
 const tabs = [
   { id: "general", icon: "⚙️", label: "通用" },
@@ -46,11 +50,22 @@ const tabs = [
   { id: "about", icon: "ℹ️", label: "关于" },
 ];
 
-const aiModels: Record<string, string[]> = {
+const aiModels = reactive<Record<string, string[]>>({
   openai: ["gpt-3.5-turbo", "gpt-4", "gpt-4o", "gpt-4o-mini"],
   deepseek: ["deepseek-chat", "deepseek-coder"],
   ollama: ["llama3", "qwen2.5", "mistral"],
   custom: [],
+});
+
+// 从设置中加载已保存的模型列表
+const loadSavedModels = () => {
+  if (settings.value.ai.models) {
+    for (const [provider, models] of Object.entries(settings.value.ai.models)) {
+      if (Array.isArray(models) && models.length > 0) {
+        aiModels[provider] = models;
+      }
+    }
+  }
 };
 
 const currentModels = computed(
@@ -79,11 +94,85 @@ watch(
   }
 );
 
-const ttsVoices = [
-  { value: "zh-CN-XiaoxiaoNeural", label: "晓晓 (女声)" },
-  { value: "zh-CN-YunxiNeural", label: "云希 (男声)" },
-  { value: "zh-CN-YunjianNeural", label: "云健 (男声)" },
-];
+const availableVoices = ref<SpeechSynthesisVoice[]>([]);
+
+const updateVoices = () => {
+  availableVoices.value = window.speechSynthesis.getVoices();
+  // 如果当前选中的声音不在列表中，且列表不为空，默认选中第一个中文声音或第一个声音
+  if (settings.value.tts.voice && !availableVoices.value.find(v => v.name === settings.value.tts.voice)) {
+     const zhVoice = availableVoices.value.find(v => v.lang.includes('zh'));
+     if (zhVoice) {
+       settings.value.tts.voice = zhVoice.name;
+     } else if (availableVoices.value.length > 0) {
+       settings.value.tts.voice = availableVoices.value[0].name;
+     }
+  }
+};
+
+const ttsVoices = computed(() => {
+  return availableVoices.value.map(v => ({
+    value: v.name,
+    label: `${v.name} (${v.lang})`
+  }));
+});
+
+const fetchModels = async () => {
+  if (isFetchingModels.value) return;
+  isFetchingModels.value = true;
+  saveMessage.value = "⏳ 获取模型中...";
+  
+  try {
+    const { provider, baseUrl, apiKey } = settings.value.ai;
+    let url = baseUrl.replace(/\/$/, "");
+    let headers: Record<string, string> = {};
+    
+    if (provider === 'ollama') {
+       url = `${url}/api/tags`;
+    } else {
+       url = `${url}/models`;
+       if (apiKey) {
+         headers['Authorization'] = `Bearer ${apiKey}`;
+       }
+    }
+
+    console.log(`Fetching models from ${url}`);
+    const response = await fetch(url, { headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    
+    const data = await response.json();
+    let models: string[] = [];
+
+    if (provider === 'ollama') {
+      models = data.models?.map((m: any) => m.name) || [];
+    } else {
+      models = data.data?.map((m: any) => m.id) || [];
+    }
+
+    if (models.length > 0) {
+      aiModels[provider] = models;
+      // 保存模型列表到设置
+      if (!settings.value.ai.models) {
+        settings.value.ai.models = {};
+      }
+      settings.value.ai.models[provider] = models;
+      
+      if (!models.includes(settings.value.ai.model)) {
+        settings.value.ai.model = models[0];
+      }
+      saveMessage.value = `✅ 已获取 ${models.length} 个模型`;
+    } else {
+      saveMessage.value = "⚠️ 未找到模型";
+    }
+  } catch (e) {
+    console.error("Fetch models failed:", e);
+    saveMessage.value = "❌ 获取模型失败";
+  } finally {
+    isFetchingModels.value = false;
+    setTimeout(() => {
+      if (saveMessage.value.includes("获取")) saveMessage.value = "";
+    }, 3000);
+  }
+};
 
 // 深度合并函数
 function deepMerge(target: any, source: any): any {
@@ -103,6 +192,11 @@ function deepMerge(target: any, source: any): any {
 }
 
 onMounted(async () => {
+  updateVoices();
+  if (window.speechSynthesis) {
+    window.speechSynthesis.onvoiceschanged = updateVoices;
+  }
+
   try {
     console.log("🔧 Loading settings...");
     const saved = await window.electronAPI?.getSettings?.();
@@ -111,6 +205,8 @@ onMounted(async () => {
       // 使用深度合并
       settings.value = deepMerge(settings.value, saved);
       console.log("✅ Settings loaded:", settings.value);
+      // 加载已保存的模型列表
+      loadSavedModels();
     }
   } catch (e) {
     console.error("❌ Load failed:", e);
@@ -321,11 +417,16 @@ const close = () => window.electronAPI?.closeSettings?.();
                 <div class="setting-desc">选择 AI 模型</div>
               </div>
             </div>
-            <select v-model="settings.ai.model" class="select">
-              <option v-for="m in currentModels" :key="m" :value="m">
-                {{ m }}
-              </option>
-            </select>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <select v-model="settings.ai.model" class="select" style="min-width: 160px;">
+                <option v-for="m in currentModels" :key="m" :value="m">
+                  {{ m }}
+                </option>
+              </select>
+              <button @click="fetchModels" :disabled="isFetchingModels" class="btn-icon" title="刷新模型列表">
+                {{ isFetchingModels ? '⏳' : '🔄' }}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -359,6 +460,42 @@ const close = () => window.electronAPI?.closeSettings?.();
                   {{ v.label }}
                 </option>
               </select>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-icon">🎚️</span>
+                <div class="setting-text">
+                  <div class="setting-title">语速</div>
+                  <div class="setting-desc">调整说话速度 ({{ settings.tts.rate?.toFixed(1) || 1 }}x)</div>
+                </div>
+              </div>
+              <input
+                type="range"
+                v-model.number="settings.tts.rate"
+                min="0.5"
+                max="2"
+                step="0.1"
+                class="slider"
+              />
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-icon">🎵</span>
+                <div class="setting-text">
+                  <div class="setting-title">音调</div>
+                  <div class="setting-desc">调整声音音调 ({{ settings.tts.pitch?.toFixed(1) || 1 }})</div>
+                </div>
+              </div>
+              <input
+                type="range"
+                v-model.number="settings.tts.pitch"
+                min="0.5"
+                max="2"
+                step="0.1"
+                class="slider"
+              />
             </div>
           </template>
         </div>
@@ -779,5 +916,28 @@ const close = () => window.electronAPI?.closeSettings?.();
 .about .copyright {
   color: #45475a;
   font-size: 12px;
+}
+.btn-icon {
+  background: #313244;
+  border: 1px solid #45475a;
+  border-radius: 8px;
+  color: #cdd6f4;
+  padding: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: #45475a;
+  border-color: #89b4fa;
+}
+
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

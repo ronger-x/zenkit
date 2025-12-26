@@ -30,6 +30,11 @@ const userDataPath = app.getPath("userData");
 const settingsPath = join(userDataPath, "settings.json");
 const logsDir = join(userDataPath, "logs");
 
+// 图标路径
+const iconPath = process.env.VITE_DEV_SERVER_URL
+  ? join(__dirname, "../public/icon.ico")
+  : join(__dirname, "../dist/icon.ico");
+
 // 获取本地日期字符串 (YYYY-MM-DD)
 function getLocalDateString(): string {
   const now = new Date();
@@ -278,6 +283,7 @@ function createWindow() {
     height: WINDOW_CONFIG.height,
     x,
     y,
+    icon: iconPath,
     // ============ 桌面宠物关键配置 ============
     transparent: true, // 透明背景
     frame: false, // 无边框
@@ -330,6 +336,7 @@ function createSettingsWindow() {
     width: 800,
     height: 680,
     title: "ZenKit 设置",
+    icon: iconPath,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -359,14 +366,7 @@ function createSettingsWindow() {
 
 // 创建系统托盘
 function createTray() {
-  // 创建一个 16x16 的猫咪图标 (橙色猫脸)
-  const iconDataUrl = `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAMlJREFUOE+lk8ENgCAQBO+sRBu
-xE9uxEzuxE0vRC0RyB8hPDHzwNYQ7dvcgBJ8IPn/qA5DGjJnJzF4B2wAMwGhmg5kpPwHxmUJV3YPZLAAz4tMl7AF0x0S4FxnOWwE7mNmi7Mxs9wJc4VbADW4F3ODvBSaAMXNVIYCnAcCICo77S8DdQGO68wjW
-ANLlnOsyVxV5h40A6epudQNgB9IVAqQb5X/aRLhTgHSDH3MNJiLyCSAzGx8VIr0DoMvcDKSr33MT4QoXE/KM/HQB8Aw/ESYMQ7AAAAAASUVORK5CYII=`;
-
-  const icon = nativeImage.createFromDataURL(iconDataUrl);
-
-  tray = new Tray(icon);
+  tray = new Tray(iconPath);
 
   const contextMenu = Menu.buildFromTemplate([
     {
